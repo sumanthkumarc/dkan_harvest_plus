@@ -16,3 +16,14 @@ This Module does the following:
    provided by the endpoint. So new template needs to be created for every dataset.
 6. We get this template , replace all placeholders and write back all the json
    data to Harvest cache directory "dkan-harvest-cache".
+
+
+For setting auto imports on cron, use the following: 
+
+4 0 * * * drush --root=/var/www/html/MY_SITE --uri=mysite.com cc drush; drush --user=1 --root=/var/www/html/MY_SITE --uri=mysite.com dkan-harvest
+
+This is for cron run per day and should be setup as root or either with user having drush and write permissions to files in docroot, which is generally(www-data). also replace the above --root and --uri with actual values on server.
+
+The automatic import of resources into datastore is done with feeds and it needs to be set for auto import on submissions(check if its new submission or for updation as well)
+
+More details on cron : https://www.drupal.org/docs/7/setting-up-cron-for-drupal/configuring-cron-jobs-using-the-cron-command
