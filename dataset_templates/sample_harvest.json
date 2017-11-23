@@ -1,0 +1,31 @@
+{
+  "@type": "dcat:Dataset",
+  "accessLevel": "public",
+  "accrualPeriodicity": "R\/P1D",
+  "contactPoint": {
+    "fn": "Sample Unit",
+    "hasEmail": "mailto:testpublisher@xyz.org"
+  },
+  "description": "Sample data",
+  "distribution": [
+    {
+      "@type": "dcat:Distribution",
+      "downloadURL": "@download_url",
+      "mediaType": "@media_type",
+      "format": "@format",
+      "description": "Sample data",
+      "title": "Sample data"
+    }
+  ],
+  "identifier": "sample_data",
+  "issued": "@issued_date",
+  "keyword": [
+    "Test"
+  ],
+  "license": "",
+  "publisher": {
+    "@type": "org:Organization",
+    "name": "Sample Publisher"
+  },
+  "title": "sample data"
+}

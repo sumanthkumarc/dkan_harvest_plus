@@ -1,0 +1,5 @@
+name = DKAN Harvest Plus
+description = Provides extra source options for harvest which are direct resources
+core = 7.x
+package = DKAN Harvest
+dependencies[] = dkan_harvest

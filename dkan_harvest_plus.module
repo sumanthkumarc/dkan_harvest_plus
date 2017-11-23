@@ -1,0 +1,183 @@
+<?php
+
+/**
+ * @file
+ * Support for non compatible data.json endpoints for dkan_harvest. The end
+ * points give raw data directly.
+ */
+
+/**
+ * Implements hook_harvest_source_types().
+ */
+function dkan_harvest_plus_harvest_source_types() {
+  return array(
+    'xml_data_endpoint' => array(
+      'machine_name' => 'xml_data_endpoint',
+      'label' => 'XML data endpoint',
+      'cache callback' => 'dkan_harvest_plus_xmldata_cache',
+      'migration class' => 'DatajsonHarvestMigration',
+    ),
+  );
+}
+
+
+/**
+ * Cache callback for raw data endpoints.
+ *
+ *
+ * @param HarvestSource $source
+ *        The source object from a datajson endpoint to cache.
+ * @param int $harvest_updatetime
+ *        Last harvest update time.
+ *
+ * @return HarvestCache
+ *         A harvest cache object.
+ */
+function dkan_harvest_plus_xmldata_cache(HarvestSource $source, $harvest_updatetime) {
+  // This is needed for remote uri.
+  $context = stream_context_create(
+    array(
+      'http' => array(
+        'timeout' => 36000,
+      ),
+      'https' => array(
+        'timeout' => 36000,
+      ),
+    )
+  );
+
+  $remote_data = @file_get_contents($source->uri, 0, $context);
+
+  if ($remote_data) {
+    $harvestCache = dkan_harvest_plus_cache_xml_to_json($remote_data, $source, $harvest_updatetime);
+    return $harvestCache;
+  }
+}
+
+
+/**
+ * Cache the datasets. This function attempts to convert the data endpoint to POD
+ * format dataset json file. It achieves this by
+ *
+ * 1. Getting the data from remote source.
+ * 2. Converting it into csv file and save it under public://dkan-plus-dataset
+ *    directory with the identifier name as csv filename.
+ * 3. This file path is used as "downloadURL" in json schema file and with appropriate
+ *    "mediaType" and "type" values.
+ * 4. The schema templates are stored under "dataset_templates" directory in this
+ *    module. This template should have same name as $identifier in the code which
+ *    is machine name of the source with a json extension.
+ * 5. This template has all the metadata for creating dataset since only data is
+ *    provided by the endpoint. So new template needs to be created for every dataset.
+ * 6. We get this template , replace all placeholders and write back all the json
+ *    data to Harvest cache directory "dkan-harvest-cache".
+ *
+ * @param string $data
+ *   Harvested data.
+ * @param HarvestSource $source
+ *   Harvest source instance.
+ * @param int $harvest_updatetime
+ *   Last harvest update time.
+ *
+ * @return HarvestCache
+ *   HarvestCache object
+ */
+function dkan_harvest_plus_cache_xml_to_json($data, HarvestSource $source, $harvest_updatetime) {
+  $harvest_cache = new HarvestCache($source, $harvest_updatetime);
+  $remote_xml_data = $data;
+  $cached = FALSE;
+
+  $identifier = $source->machineName;
+  $harvest_dataset_file = implode('/', array(
+    $source->getCacheDir(),
+    $identifier
+  ));
+
+  // We need common folder to save all datasets from dkan plus enabled sources.
+  $dkan_plus_dataset_dir = 'public://dkan-plus-datasets';
+  if (!is_dir($dkan_plus_dataset_dir)) {
+    mkdir($dkan_plus_dataset_dir, 0777);
+  }
+
+  $csv_file = implode('/', array($dkan_plus_dataset_dir, $identifier . '.csv'));
+  if (!empty($remote_xml_data)) {
+    $xml = simplexml_load_string($remote_xml_data);
+    $f = fopen($csv_file, 'a');
+    createCsv($xml, $f);
+    fclose($f);
+  }
+
+  // We get default template and replace values since we don't get metadata and
+  // endpoint doesn't provide data in POD format.
+  $module_path = drupal_get_path('module', 'dkan_harvest_plus');
+  $dataset_file = $identifier . '.json';
+  $dataset_template = implode('/', array(
+    $module_path,
+    'dataset_templates',
+    $dataset_file
+  ));
+  $default_json_dataset = @file_get_contents($dataset_template);
+
+  if ($default_json_dataset) {
+    $replacements = array(
+      '@download_url' => file_create_url($csv_file),
+      '@media_type' => 'text\/csv',
+      '@format' => 'csv',
+      '@issued_date' => date_now(),
+    );
+    $final_dataset = strtr($default_json_dataset, $replacements);
+    $cached = @file_put_contents($harvest_dataset_file, $final_dataset);
+  }
+
+  if (!$cached) {
+    $harvest_cache->setCacheEntryFailed($identifier, $source->label);
+  }
+  else {
+    // This will reset the failed flag if previously set.
+    $harvest_cache->setCacheEntryProcessed($identifier, $source->label);
+  }
+
+  return $harvest_cache;
+}
+
+function createCsv($xml, $f) {
+  fwrite($f, "\xEF\xBB\xBF");
+  $header = FALSE;
+  foreach ($xml as $k => $details) {
+    if (!$header) {
+      $csv_line = arrayToCsv(array_keys(get_object_vars($details)), ',', '"', TRUE, FALSE);
+      fwrite($f, $csv_line . "\r\n");
+      $header = TRUE;
+    }
+    $csv_line = arrayToCsv(get_object_vars($details), ',', '"', TRUE, FALSE);
+    fwrite($f, $csv_line . "\r\n");
+  }
+
+}
+
+/**
+ * Formats a line (passed as a fields  array) as CSV and returns the CSV as a string.
+ * Adapted from http://us3.php.net/manual/en/function.fputcsv.php#87120
+ */
+function arrayToCsv(array &$fields, $delimiter = ';', $enclosure = '"', $encloseAll = FALSE, $nullToMysqlNull = FALSE) {
+  $delimiter_esc = preg_quote($delimiter, '/');
+  $enclosure_esc = preg_quote($enclosure, '/');
+
+  $output = array();
+  foreach ($fields as $field) {
+    if ($field === NULL && $nullToMysqlNull) {
+      $output[] = 'NULL';
+      continue;
+    }
+
+    // Enclose fields containing $delimiter, $enclosure or whitespace
+    if ($encloseAll || preg_match(" / (?:${delimiter_esc} | ${enclosure_esc} | \s)/", $field)) {
+      $output[] = $enclosure . str_replace($enclosure, $enclosure . $enclosure, $field) . $enclosure;
+    }
+    else {
+      $output[] = $field;
+    }
+  }
+
+  return implode($delimiter, $output);
+}
